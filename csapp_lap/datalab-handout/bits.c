@@ -165,7 +165,8 @@ int tmin(void) {
  *   Rating: 1
  */
 int isTmax(int x) {
-
+  // consider the uniquness of Tmax: 0111...1   only Tmax + 1 == Tmin
+  // besides we have Tmax == ~Tmin
 	int i = x + 1;
 	x = x +i;
 	x = ~x;
@@ -233,14 +234,10 @@ int isAsciiDigit(int x) {
 int conditional(int x, int y, int z) {
   int tmp;
 	x = !(!x);
-	x = (x << 1) + x;
-	x = (x << 2) + x;
-	x = (x << 4) + x;
-	x = (x << 8) + x;
-	x = (x << 16) + x;
+	x = ~x + 1;     // change 0 -> 0000..0   1-> 1111..1
 	tmp = x & y;
 	x = z & (~x);
-	return x | tmp;
+	return x | tmp;     // consider return a shape like (x & y) | (!x & z)
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
@@ -250,8 +247,21 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  
-	return 2;
+  // consider that we check the MSB of (y - x) if (y - x) >= 0 return 1 
+  // may overflow when one is pos and one is neg
+  // compare their MSB at first
+  int ms_x, ms_y, ms_v;
+  int msb = 1 << 31;
+  ms_x = x & msb; ms_y = y & msb;
+  ms_v = ms_x ^ ms_y;
+  ms_x = !!ms_x;
+  ms_v = !!ms_v;
+  // MSB same, using their differential
+  x = (~x) + 1; // -x 
+  y = y + x;
+  y = y & msb;
+  y = !y;
+	return  (ms_v & ms_x) | ((!ms_v) & y);
 }
 //4
 /* 
@@ -263,7 +273,10 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4 
  */
 int logicalNeg(int x) {
-  return 2;
+  // consider that only arithmaticNeg(0) == 0 using lowbit to make all bits above lowbit 1s
+  x = x | (~x + 1);
+  x = x >> 31;
+  return x + 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
@@ -278,7 +291,22 @@ int logicalNeg(int x) {
  *  Rating: 4
  */
 int howManyBits(int x) {
-  return 0;
+  int sign = x >> 31;
+  x = (sign & (~x)) | ((~sign) & x);
+  int b16, b8, b4, b2, b1;
+
+  // upper 16bit
+  b16 = !!(x >> 16) << 4;
+  x = x>> b16;
+  b8 = !!(x >> 8) << 3;
+  x = x>> b8;
+  b4 = !!(x >> 4) << 2;
+  x = x>> b4;
+  b2 = !!(x >> 2) << 1;
+  x = x>> b2;
+  b1 = !!(x >> 1);
+  x = x>> b1;
+  return b16+b8+b4+b2+b1+x+1;
 }
 //float
 /* 
@@ -293,7 +321,13 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned floatScale2(unsigned uf) {
-  return 2;
+  int exp = (uf&0x7f800000)>>23;
+  int sign = uf&(1<<31);
+  if(exp==0) return uf<<1|sign;
+  if(exp==255) return uf;
+  exp++;
+  if(exp==255) return 0x7f800000|sign;
+  return (exp<<23)|(uf&0x807fffff);
 }
 /* 
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
