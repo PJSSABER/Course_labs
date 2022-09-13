@@ -342,7 +342,28 @@ unsigned floatScale2(unsigned uf) {
  *   Rating: 4
  */
 int floatFloat2Int(unsigned uf) {
-  return 2;
+  int sign = uf & (1 << 31);
+  int exp = (uf & 0x7f800000)>>23;
+  int sif = uf & 0x007fffff;
+  // printf("sign is %x\n", sign);
+  // printf("exp is %x\n", exp);
+  // printf("sif is %x\n", sif);
+  exp -= 127;
+  if (exp > 30) return 0x80000000;
+  if (exp < 0) return 0;
+  sif = sif | 0x00800000;
+  int valid_bit = exp + 1;
+  int ans;  
+ 
+  if (valid_bit < 24) {
+    int mask = ((1 << valid_bit) - 1) << (24 - valid_bit);
+    ans = (mask & sif) >> (24 - valid_bit);
+  } else {
+    ans = sif << (valid_bit - 24);
+  }
+  if (sign)   // if it's negtive, using two's complement
+    ans = ~ans + 1;
+  return ans;
 }
 /* 
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -358,5 +379,17 @@ int floatFloat2Int(unsigned uf) {
  *   Rating: 4
  */
 unsigned floatPower2(int x) {
-    return 2;
+  unsigned INF = 0x7f800000;
+  if (x > 127)
+    return INF;
+  if (x < -150 )   // mini denorm would be [ 0  0000..0 0000...01] 24 + 126
+    return 0;      //                     |sig| |exp|  |frac|
+
+  x += 127;
+  unsigned ans = 0;
+  ans = ans | (x << 23);
+  if (x < 0) {
+    ans = ans | (1 << (23 + x));
+  }
+  return ans;
 }
