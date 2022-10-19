@@ -1,0 +1,4 @@
+Phase1:
+Border relations with Canada have never been better.
+Phase2: notice that 0x18 = 24 in decimal
+1 2 4 8 16 32
