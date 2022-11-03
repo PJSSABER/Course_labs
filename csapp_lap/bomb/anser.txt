@@ -6,3 +6,13 @@ phase3: other qualified answers can be examined
 7 327
 phase4:
 7 0
+
+
+
+
+
+
+
+
+phase6:
+from - to 0x401153: a. 6个数组必须在1-6之间 b. 两重循环可得知， 6个数字各不相同
