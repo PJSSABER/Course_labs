@@ -6,3 +6,11 @@ phase3: other qualified answers can be examined
 7 327
 phase4:
 7 0
+phsase5:
+yonuvw
+(
+here answer is not unique; 
+hint: note that we need find six characters and use its lowest 4bits as a bias in source array
+0x4024b0:maduiersnfotvbyl
+to form a string which is the same as what 0x40245e stored. Only the lowest bit match is OK in this section.
+)
