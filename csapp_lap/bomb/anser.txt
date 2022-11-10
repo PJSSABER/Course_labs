@@ -6,6 +6,7 @@ phase3: other qualified answers can be examined
 7 327
 phase4:
 7 0
+
 phsase5:
 yonuvw
 (
@@ -14,3 +15,8 @@ hint: note that we need find six characters and use its lowest 4bits as a bias i
 0x4024b0:maduiersnfotvbyl
 to form a string which is the same as what 0x40245e stored. Only the lowest bit match is OK in this section.
 )
+
+
+phase6:
+from - to 0x401153: a. 6个数组必须在1-6之间(通过sub1, 以及无符号数比较保证大于等于0) b. 两重循环可得知， 6个数字各不相同
+from 0x401158 to 0x40116f: a[i] = 7 - a[i]
