@@ -40,4 +40,35 @@ array[i] ponit to node[i]  node[i].next point to node[i+1]
 
 
 secret phase:
+
 interpoint: phase4: add 3 arguments, string:DrEvil
+note that the return value of func7 Needs tobe 2 to meet the match
+func7 looks like 
+func7(node*ptr, int val) {
+	int rt;
+	if (ptr->val > ca) {
+		rt = func7(ptr->left, ca);
+		return 2*rt;
+	} else {
+		if (ptr->val == ca)
+			return 0;
+		rt = func7(ptr->right, ca);
+		return 2*rt + 1;
+	}
+}
+
+a possible way is :
+recursive 0: return 2 by 2*1
+recursive 1: return 1 by 2*0 + 1
+recursive 2: return 0 
+
+tree looks like:
+
+/*
+			    36
+			   /  \
+                          8
+			 / \
+			6   22
+*/
+So 22 is the possible val
