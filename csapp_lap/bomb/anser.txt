@@ -20,3 +20,24 @@ to form a string which is the same as what 0x40245e stored. Only the lowest bit 
 phase6:
 from - to 0x401153: a. 6个数组必须在1-6之间(通过sub1, 以及无符号数比较保证大于等于0) b. 两重循环可得知， 6个数字各不相同
 from 0x401158 to 0x40116f: a[i] = 7 - a[i]
+from 0x401176 to 0x4011d0：填充栈上的指针数组，根据a[i]的值放入对应的指针
+指针指向区域为一个结构体的区域 node {int val; node* next}
+
+(gdb) x/12xg 0x6032d0
+0x6032d0 <node1>:       0x000000010000014c      0x00000000006032e0
+0x6032e0 <node2>:       0x00000002000000a8      0x00000000006032f0
+0x6032f0 <node3>:       0x000000030000039c      0x0000000000603300
+0x603300 <node4>:       0x00000004000002b3      0x0000000000603310
+0x603310 <node5>:       0x00000005000001dd      0x0000000000603320
+0x603320 <node6>:       0x00000006000001bb      0x0000000000000000
+
+update their next ptr;
+
+array[i] ponit to node[i]  node[i].next point to node[i+1]
+
+最后，node需要照val进行降序排列
+4 3 2 1 6 5
+
+
+secret phase:
+interpoint: phase4: add 3 arguments, string:DrEvil
