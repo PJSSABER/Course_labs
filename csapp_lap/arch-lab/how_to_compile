@@ -1,0 +1,9 @@
+因为本套件依赖 Tcl/tk，我们需要安装这两个软件：
+
+$ sudo apt install tcl tcl-dev tk tk-dev
+因为 Makefile 里写的 tcl 的版本已经比较老了，我们需要修改一下 Makefile：
+
+$ sed -i "s/tcl8.5/tcl8.6/g" Makefile
+$ sed -i "s/CFLAGS=/CFLAGS=-DUSE_INTERP_RESULT /g" Makefile
+
+also need install flex-devel package
