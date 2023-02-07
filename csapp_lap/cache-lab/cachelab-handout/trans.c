@@ -20,8 +20,28 @@ int is_transpose(int M, int N, int A[N][M], int B[M][N]);
  *     be graded. 
  */
 char transpose_submit_desc[] = "Transpose submission";
+#define min(a,b) ((a) < (b) ? (a) : (b))
+/*
+    using python2 to activate driver.py
+    考虑 thresh
+*/
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
+    // s=5, E=1, b=5 
+    int i, j, bi, bj;//tmp;
+    int blk_sz = 8;
+    int lne_sz = 16;
+    if (M == 64)
+        blk_sz = lne_sz = 4;
+    for (bi = 0; bi < N; bi += lne_sz) {
+        for (bj = 0; bj < M; bj += blk_sz) {
+            for (i = bi; i < min(bi+lne_sz, N); i++) {
+                for (j = bj; j < min(bj+blk_sz, M); j++) {
+                    B[j][i] = A[i][j];
+                }
+            }
+        }
+    }    
 }
 
 /* 
