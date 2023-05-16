@@ -3,6 +3,7 @@
  * 
  * <Put your name and login ID here>
  */
+// #include <csignal>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <assert.h>
 
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
@@ -53,11 +55,18 @@ struct job_t jobs[MAXJOBS]; /* The job list */
 
 
 /* Function prototypes */
+// maybe helpful:
+// waitpid(__pid_t pid, int *stat_loc, int options)
+// kill(__pid_t pid, int sig)
+// fork()
+// execve
+// setpgid
+// sigprocmask(int how, const sigset_t *__restrict set, sigset_t *__restrict oset)
 
 /* Here are the functions that you will implement */
 void eval(char *cmdline);
 int builtin_cmd(char **argv);
-void do_bgfg(char **argv);
+void do_bgfg(char **argv); 
 void waitfg(pid_t pid);
 
 void sigchld_handler(int sig);
@@ -165,6 +174,28 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS + 1];
+    pid_t fg_pid;
+
+    int is_bg = parseline(cmdline, argv); // whether is a bg job
+    int is_builtin = builtin_cmd(argv); // find builtin and execute
+
+    if (!is_builtin) { // not a built in function
+        fg_pid = fork();
+        if (fg_pid < 0) {
+            unix_error("fork error!");
+        } else if (fg_pid == 0) {
+            setpgid(0, 0);
+            execve(argv[0], argv, environ);
+            unix_error("execve error!");
+        }
+        addjob(jobs, fg_pid, FG, cmdline);
+    }
+    
+    fg_pid = fgpid(jobs);
+    if (fg_pid > 0) {
+        waitfg(fg_pid);
+    }
     return;
 }
 
@@ -174,7 +205,8 @@ void eval(char *cmdline)
  * Characters enclosed in single quotes are treated as a single
  * argument.  Return true if the user has requested a BG job, false if
  * the user has requested a FG job.  
- */
+ */ 
+ //what may need check: argc ? 
 int parseline(const char *cmdline, char **argv) 
 {
     static char array[MAXLINE]; /* holds local copy of command line */
@@ -231,6 +263,20 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    if (argv[0] != NULL) {
+        if (strcmp("fg", argv[0]) == 0) {
+            do_bgfg(argv);
+            return 1;
+        } else if (strcmp("bg", argv[0]) == 0) {
+            do_bgfg(argv);
+            return 1;
+        } else if (strcmp("jobs", argv[0]) == 0) {
+            listjobs(jobs);
+            return 1;
+        } else if (strcmp("quit", argv[0]) == 0) {
+            exit(0); // shall anything needs to be checked here ?
+        }
+    }
     return 0;     /* not a builtin command */
 }
 
@@ -239,6 +285,30 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    assert(argv[0] != NULL);
+    assert(argv[1] != NULL);
+    struct job_t *tar_job;
+    if (argv[1][0] == '%') { // identify by jid
+        pid_t pid = atoi(argv[1] + 1);
+        tar_job = getjobjid(jobs, pid);
+    } else { // by pid
+        pid_t pid = atoi(argv[1]);
+        tar_job = getjobpid(jobs, pid);
+    }
+
+    // job can be terminated anytime
+    assert(tar_job != NULL); 
+    if (strcmp("fg", argv[0]) == 0) { // fg
+        assert(tar_job->state != UNDEF);
+        tar_job->state = FG;
+        kill(-tar_job->pid, SIGCONT);
+        // send a sigcont to continue
+    } else {
+        assert(tar_job->state == BG);
+        tar_job->state = BG;
+        kill(-tar_job->pid, SIGCONT);
+        // send a sigcont to continue
+    }
     return;
 }
 
@@ -246,7 +316,10 @@ void do_bgfg(char **argv)
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid)
-{
+{ // three ways to break: sigint, sigchd, sigstp
+    struct job_t *tar_job = getjobpid(jobs, pid);
+    while (tar_job->pid == fgpid(jobs))
+        sleep(3);
     return;
 }
 
@@ -263,6 +336,13 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int olderrno = errno;
+    pid_t pid;
+    while ((pid = waitpid(-1, NULL, 0)) > 0 ) {
+        struct job_t *job = getjobpid(jobs, pid);
+        deletejob(jobs, pid);
+        clearjob(job);
+    }
     return;
 }
 
@@ -273,6 +353,10 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    pid_t fg_pid = fgpid(jobs);
+    if (fg_pid > 0) {
+        kill(fg_pid, sig);
+    }
     return;
 }
 
@@ -283,6 +367,10 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    pid_t fg_pid = fgpid(jobs);
+    if (fg_pid > 0) {
+        kill(fg_pid, sig);
+    }
     return;
 }
 
