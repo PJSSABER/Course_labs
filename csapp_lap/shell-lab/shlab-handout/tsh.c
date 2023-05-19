@@ -175,23 +175,37 @@ int main(int argc, char **argv)
 void eval(char *cmdline) 
 {
     char *argv[MAXARGS + 1];
-    pid_t fg_pid;
+    pid_t fg_pid = 0;
+    sigset_t mask_all, prev_all;
 
+    sigfillset(&mask_all);
     int is_bg = parseline(cmdline, argv); // whether is a bg job
     int is_builtin = builtin_cmd(argv); // find builtin and execute
 
     if (!is_builtin) { // not a built in function
+        if (argv[0] == NULL) {
+            return;
+        }
+
+        sigprocmask(SIG_BLOCK, &mask_all, &prev_all);  // block chld
         fg_pid = fork();
         if (fg_pid < 0) {
-            unix_error("fork error!");
+            unix_error("yiyudebug: fork error!");
         } else if (fg_pid == 0) {
             setpgid(0, 0);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
             execve(argv[0], argv, environ);
-            unix_error("execve error!");
+            unix_error("yiyudebug: execve error233!");
+            exit(1);
         }
-        addjob(jobs, fg_pid, FG, cmdline);
+        addjob(jobs, fg_pid, 1 + is_bg, cmdline);
+        sigprocmask(SIG_SETMASK, &prev_all, NULL);
     }
     
+    if (is_bg && fg_pid > 0) {
+        printf("[%d] (%d) %s", pid2jid(fg_pid), fg_pid, cmdline);
+    }
+
     fg_pid = fgpid(jobs);
     if (fg_pid > 0) {
         waitfg(fg_pid);
@@ -274,7 +288,9 @@ int builtin_cmd(char **argv)
             listjobs(jobs);
             return 1;
         } else if (strcmp("quit", argv[0]) == 0) {
-            exit(0); // shall anything needs to be checked here ?
+            pid_t fg_pid = fgpid(jobs);
+            kill(-fg_pid, SIGINT);
+            exit(0); // is this neccessary ?
         }
     }
     return 0;     /* not a builtin command */
@@ -283,11 +299,21 @@ int builtin_cmd(char **argv)
 /* 
  * do_bgfg - Execute the builtin bg and fg commands
  */
+
+/*
+    this function actually needs tobe protected by sigmask when setting jobs[i].status
+    cause it may stuck in race-condition with sigchld when it erase the job
+    however we don't use  jobs[i].status as a judge statement, so it can ommit this
+*/
 void do_bgfg(char **argv) 
 {
     assert(argv[0] != NULL);
-    assert(argv[1] != NULL);
-    struct job_t *tar_job;
+    if (argv[1] == NULL) {
+        printf("%s command requires PID or %%jobid argument:\n", argv[0]);
+        return;
+    }
+    struct job_t *tar_job = NULL;
+
     if (argv[1][0] == '%') { // identify by jid
         pid_t pid = atoi(argv[1] + 1);
         tar_job = getjobjid(jobs, pid);
@@ -297,16 +323,19 @@ void do_bgfg(char **argv)
     }
 
     // job can be terminated anytime
-    assert(tar_job != NULL); 
+    if (tar_job == NULL) {
+        printf("%s: No such job\n", argv[1]);
+        return;
+    }
+
     if (strcmp("fg", argv[0]) == 0) { // fg
-        assert(tar_job->state != UNDEF);
         tar_job->state = FG;
         kill(-tar_job->pid, SIGCONT);
         // send a sigcont to continue
     } else {
-        assert(tar_job->state == BG);
         tar_job->state = BG;
         kill(-tar_job->pid, SIGCONT);
+        printf("[%d] (%d) %s", tar_job->jid, tar_job->pid, tar_job->cmdline);
         // send a sigcont to continue
     }
     return;
@@ -317,9 +346,8 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 { // three ways to break: sigint, sigchd, sigstp
-    struct job_t *tar_job = getjobpid(jobs, pid);
-    while (tar_job->pid == fgpid(jobs))
-        sleep(3);
+    while (pid == fgpid(jobs))
+        sleep(0);
     return;
 }
 
@@ -334,15 +362,42 @@ void waitfg(pid_t pid)
  *     available zombie children, but doesn't wait for any other
  *     currently running children to terminate.  
  */
+
+// here's a trickey thing should be careful:
+// when child process get sigint or sigstp, parent process also get a sigchld
+// should devide these situation
 void sigchld_handler(int sig) 
 {
     int olderrno = errno;
+    sigset_t mask_all, prev_all;
+    sigfillset(&mask_all);
     pid_t pid;
-    while ((pid = waitpid(-1, NULL, 0)) > 0 ) {
-        struct job_t *job = getjobpid(jobs, pid);
-        deletejob(jobs, pid);
-        clearjob(job);
+    int status;
+
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0 ) {  // checkout this two option, turns out to be important
+        if (WIFEXITED(status)) { // normal exit
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            deletejob(jobs, pid);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        }
+
+        if (WIFSIGNALED(status)) { // got sigint
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            deletejob(jobs, pid);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        } 
+
+        if (WIFSTOPPED(status)) { // got sigSTP
+            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            struct job_t *job = getjobpid(jobs, pid);
+            job->state = ST;
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        }
     }
+
+    errno = olderrno;
     return;
 }
 
@@ -355,7 +410,7 @@ void sigint_handler(int sig)
 {
     pid_t fg_pid = fgpid(jobs);
     if (fg_pid > 0) {
-        kill(fg_pid, sig);
+        kill(-fg_pid, SIGINT);
     }
     return;
 }
@@ -369,7 +424,7 @@ void sigtstp_handler(int sig)
 {
     pid_t fg_pid = fgpid(jobs);
     if (fg_pid > 0) {
-        kill(fg_pid, sig);
+        kill(-fg_pid, SIGTSTP);  // from FG -> ST
     }
     return;
 }
