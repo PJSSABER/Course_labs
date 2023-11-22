@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <csapp.h>
+#include <stdbool.h>
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -31,6 +32,13 @@ from the client and parse the request
 typedef struct sockaddr_storage sockaddr_storage;
 
 void doit(int fd);
+int debug;
+void yiyu_debug(char *s)
+{
+    if (debug) {
+        printf("%s", s);
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -53,19 +61,66 @@ int main(int argc, char **argv)
     return 0;
 }
 
+void parse_uri(char *uri, char *hostname, char *port)
+{
+    char *colon = strstr(uri, ":");
+    if (colon) {
+        strcpy(port, colon+1);
+    } else { // no port
+        strcpy(port, "80");
+    }
+
+    uint32_t uri_len = strlen(uri);
+    bool flag = false;
+    for (int i = 0; i < uri_len; i++) {
+        if (flag ) {
+            if (uri[i] == '/') {
+                break;
+            }
+            *port = uri[i];
+            port++;
+        } else {
+            if (uri[i] == 'w') {
+                flag = true;
+                *port = uri[i];
+                port++;
+            }
+        }
+    }
+}
+
 void doit(int clientfd) 
 {
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char hostname[MAXLINE], port[MAXLINE];
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], hostname[MAXLINE],//if not specified in header, parse from uri 
+    port[MAXLINE];//if not specified in header, 80 
+    char send_msg[MAXLINE];
+    rio_t rio;
+    Rio_readinitb(&rio, clientfd);
     // 1.read request line, check method, uri, version, check if valid
-    // 2.read request-header, get host, port
-    // 3.open connect to the server 
-        /*
-            Open connection to server at <hostname, port>
-            proxyfd = open_clientfd(hostname, port)
+    if (!Rio_readlineb(&rio, buf, MAXLINE)) {
+        return;
+    }
+    yiyu_debug(buf);
+    sscanf(buf, "%s %s %s", method, uri, version);
 
-        */
-    // 4.read other request to fullfil buf, also append what's needed(version, suffix)
+    if (strcasecmp(method, "GET")) {
+        printf("Not support HTTP type, support only GET!");
+        return;
+    } else {
+        sprintf(send_msg, method, " ", uri);
+    }
+    // check port
+    parse_uri(uri, hostname, port);
+    sprintf(send_msg, " HTTP/1.0 \r\n");
+    // 2.read request-header, check if host exist
+    
+    // 3.read other request to fullfil buf, also append what's needed(version, suffix)
+    // 4.open connect to the server 
+    /*
+        Open connection to server at <hostname, port>
+        proxyfd = open_clientfd(hostname, port)
+
+    */
     // 5.write to the server and get respond
     // 7.write to clientfd
     // 8.close proxyfd
