@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <csapp.h>
+#include "csapp.h"
 #include <stdbool.h>
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -64,37 +64,96 @@ int main(int argc, char **argv)
 void parse_uri(char *uri, char *hostname, char *port)
 {
     char *colon = strstr(uri, ":");
-    if (colon) {
-        strcpy(port, colon+1);
+    if (colon) {    // http://www.cmu.edu:8080/hub/index.html  http://www.cmu.edu:8080
+        while (colon && *colon != '/') {
+            *port = *colon;
+            colon++; 
+            port++;
+        }
     } else { // no port
         strcpy(port, "80");
     }
 
     uint32_t uri_len = strlen(uri);
-    bool flag = false;
+    int flag = 0;
     for (int i = 0; i < uri_len; i++) {
-        if (flag ) {
+        if (flag == 2) {
             if (uri[i] == '/') {
                 break;
             }
-            *port = uri[i];
-            port++;
+            *hostname = uri[i];
+            hostname++;
         } else {
-            if (uri[i] == 'w') {
-                flag = true;
-                *port = uri[i];
-                port++;
+            if (uri[i] == '/') {
+                flag += 1;
             }
         }
     }
 }
 
+void read_request_header(rio_t *rp, char *request_header, char* hostname) 
+{
+    char buf[MAXLINE], key[MAXLINE], value[MAXLINE];
+    bool host_specify = false; // if should use hostname
+
+    Rio_readlineb(rp, buf, MAXLINE);
+    printf("%s", buf);
+    while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
+        if (!host_specify) {
+            sscanf(buf, "%s %s", key, value);
+            if (!strcmp(key, "Host:")) { // if have Host-header
+                host_specify = true;
+            }
+        }
+        sprintf(request_header, buf);
+        Rio_readlineb(rp, buf, MAXLINE);
+        printf("%s", buf);
+    }
+    
+    // add optional here
+    sprintf(request_header, "Connection: close\r\n");
+    sprintf(request_header, "Proxy-Connection: close\r\n");
+    sprintf(request_header, user_agent_hdr);
+    if (!host_specify) {  // if host not specify, parse from url
+        sprintf(request_header, "Host: ");
+        sprintf(request_header, hostname);
+        sprintf(request_header, "\r\n");
+    }
+    sprintf(request_header, "\r\n");
+    return;
+}
+
+void forward_msg(char *hostname, char *port, char *send_msg, int clientfd)
+{
+    int proxyfd;
+    rio_t rio;
+    char buf[MAXLINE], response[MAXLINE];
+
+    proxyfd = Open_clientfd(hostname, port);
+    Rio_readinitb(&rio, proxyfd);
+    Rio_writen(proxyfd, send_msg, MAXLINE);
+    
+    Rio_readlineb(&rio, buf, MAXLINE);
+    printf("%s", buf);
+    while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
+        sprintf(response, buf);
+        Rio_readlineb(&rio, buf, MAXLINE);
+        printf("%s", buf);
+    }
+    sprintf(response, "\r\n");
+
+    //write to clientfd
+    Rio_writen(clientfd, response, MAXLINE);
+    Close(proxyfd);
+}
+
 void doit(int clientfd) 
 {
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], hostname[MAXLINE],//if not specified in header, parse from uri 
-    port[MAXLINE];//if not specified in header, 80 
+    port[MAXLINE], request_header[MAXLINE];//if not specified in header, 80 
     char send_msg[MAXLINE];
     rio_t rio;
+
     Rio_readinitb(&rio, clientfd);
     // 1.read request line, check method, uri, version, check if valid
     if (!Rio_readlineb(&rio, buf, MAXLINE)) {
@@ -109,20 +168,22 @@ void doit(int clientfd)
     } else {
         sprintf(send_msg, method, " ", uri);
     }
+    sprintf(send_msg, " HTTP/1.0 \r\n");   // finish first
+
     // check port
     parse_uri(uri, hostname, port);
-    sprintf(send_msg, " HTTP/1.0 \r\n");
-    // 2.read request-header, check if host exist
-    
-    // 3.read other request to fullfil buf, also append what's needed(version, suffix)
+    // 2.read request-header, check if host exist, fullfill request_header, also append what's needed(version, suffix)
+    read_request_header(&rio, request_header, hostname);
+    // 3.combine the send_msg, 
+    sprintf(send_msg, request_header);
     // 4.open connect to the server 
     /*
         Open connection to server at <hostname, port>
         proxyfd = open_clientfd(hostname, port)
-
+        // 5.write to the server and get respond
+        // 7.write to clientfd
+        // 8.close proxyfd
     */
-    // 5.write to the server and get respond
-    // 7.write to clientfd
-    // 8.close proxyfd
-
+    forward_msg(hostname, port, send_msg, clientfd);
 }
+
