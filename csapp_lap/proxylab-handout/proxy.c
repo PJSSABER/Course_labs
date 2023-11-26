@@ -29,10 +29,14 @@ from the client and parse the request
     5. Your proxy must properly function whether or not the port number is included in the URL(by default is port 80)
     6(done). Your proxy should accept a command line argument specifying the listening port number for your proxy.
 */
+
+#define clr(x) memset(x, 0, sizeof x)
 typedef struct sockaddr_storage sockaddr_storage;
 
+
 void doit(int fd);
-int debug;
+int debug = 1;
+
 void yiyu_debug(char *s)
 {
     if (debug) {
@@ -61,11 +65,16 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void parse_uri(char *uri, char *hostname, char *port)
+void parse_uri(char *uri, char *hostname, char *port, char *file)
 {
     char *colon = strstr(uri, ":");
-    if (colon) {    // http://www.cmu.edu:8080/hub/index.html  http://www.cmu.edu:8080
-        while (colon && *colon != '/') {
+    if (colon) {
+        colon++;
+    }
+    colon = strstr(colon, ":"); // http://www.cmu.edu:8080/hub/index.html  http://www.cmu.edu:8080 pass first
+    if (colon) {   
+        colon++; 
+        while (*colon != '\0' && *colon != '/') {
             *port = *colon;
             colon++; 
             port++;
@@ -78,7 +87,7 @@ void parse_uri(char *uri, char *hostname, char *port)
     int flag = 0;
     for (int i = 0; i < uri_len; i++) {
         if (flag == 2) {
-            if (uri[i] == '/') {
+            if (uri[i] == '/' || uri[i] == ':') {
                 break;
             }
             *hostname = uri[i];
@@ -89,61 +98,88 @@ void parse_uri(char *uri, char *hostname, char *port)
             }
         }
     }
+
+    flag = 0; int file_len = 0;
+    for (int i = 0; i < uri_len; i++) {
+        if (uri[i] == '/') {
+            flag += 1;
+        } 
+        
+        if (flag == 3) {
+            file[file_len++] = uri[i];
+        }
+    }
+
+    if (file_len == 0) {
+        strcpy(file, "/home.html");
+    }
 }
 
-void read_request_header(rio_t *rp, char *request_header, char* hostname) 
+void read_request_header(rio_t *rp, char *request_header, char* hostname, char *port) 
 {
-    char buf[MAXLINE], key[MAXLINE], value[MAXLINE];
+    char buf[MAXLINE], key[MAXLINE], value[MAXLINE]; clr(buf);
     bool host_specify = false; // if should use hostname
+    int req_pos = 0;
 
     Rio_readlineb(rp, buf, MAXLINE);
     printf("%s", buf);
     while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
         if (!host_specify) {
             sscanf(buf, "%s %s", key, value);
-            if (!strcmp(key, "Host:")) { // if have Host-header
+            if (!strcmp(key, "Host:")) { // if have Host-header   sometime " Host: localhost:32885 "
                 host_specify = true;
+                char *colon = strstr(value, ":");
+                char *tmp = hostname; // overwrite hostname
+                for (char *itr = value; itr != colon; itr++, tmp++) {
+                    *tmp = *itr;
+                }
+                *tmp = '\0';
+
+                if (colon) {    // if port specified, overwrite
+                    colon++; 
+                    while (*colon != '\0' && *colon != '/') {  // !! can not use !colon
+                        *port = *colon;
+                        colon++; 
+                        port++;
+                    }
+                    *port = '\0';
+                } 
             }
         }
-        sprintf(request_header, buf);
+        req_pos += sprintf(request_header + req_pos, buf);
         Rio_readlineb(rp, buf, MAXLINE);
         printf("%s", buf);
     }
     
     // add optional here
-    sprintf(request_header, "Connection: close\r\n");
-    sprintf(request_header, "Proxy-Connection: close\r\n");
-    sprintf(request_header, user_agent_hdr);
+    req_pos += sprintf(request_header + req_pos, "Connection: close\r\n");
+    req_pos += sprintf(request_header + req_pos, "Proxy-Connection: close\r\n");
+    req_pos += sprintf(request_header + req_pos, user_agent_hdr);
     if (!host_specify) {  // if host not specify, parse from url
-        sprintf(request_header, "Host: ");
-        sprintf(request_header, hostname);
-        sprintf(request_header, "\r\n");
+        req_pos += sprintf(request_header + req_pos, "Host: ");
+        req_pos += sprintf(request_header + req_pos, hostname);
+        req_pos += sprintf(request_header + req_pos, "\r\n");
     }
-    sprintf(request_header, "\r\n");
+    req_pos += sprintf(request_header + req_pos, "\r\n");
     return;
 }
 
 void forward_msg(char *hostname, char *port, char *send_msg, int clientfd)
 {
-    int proxyfd;
+    int proxyfd, n;
     rio_t rio;
-    char buf[MAXLINE], response[MAXLINE];
+    char buf[MAXLINE]; clr(buf);
 
+    yiyu_debug(send_msg);
     proxyfd = Open_clientfd(hostname, port);
     Rio_readinitb(&rio, proxyfd);
-    Rio_writen(proxyfd, send_msg, MAXLINE);
+    Rio_writen(proxyfd, send_msg, strlen(send_msg));
     
-    Rio_readlineb(&rio, buf, MAXLINE);
-    printf("%s", buf);
-    while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
-        sprintf(response, buf);
-        Rio_readlineb(&rio, buf, MAXLINE);
+    while ( (n = Rio_readlineb(&rio, buf, MAXLINE)) != 0 ) {          //line:netp:readhdrs:checkterm
+        Rio_writen(clientfd, buf, n);
         printf("%s", buf);
     }
-    sprintf(response, "\r\n");
-
     //write to clientfd
-    Rio_writen(clientfd, response, MAXLINE);
     Close(proxyfd);
 }
 
@@ -151,7 +187,10 @@ void doit(int clientfd)
 {
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], hostname[MAXLINE],//if not specified in header, parse from uri 
     port[MAXLINE], request_header[MAXLINE];//if not specified in header, 80 
-    char send_msg[MAXLINE];
+    char send_msg[MAXLINE]; int send_pos = 0;
+    char file[MAXLINE];
+    clr(buf); clr(method); clr(uri); clr(version); clr(hostname); clr(port); clr(request_header); clr(send_msg); clr(file);
+    // important！！！为什么要清除？ bug; 先跑 csapp.c 后跑 tiny的时候， stack复用后， file会是 tinyp.c
     rio_t rio;
 
     Rio_readinitb(&rio, clientfd);
@@ -166,16 +205,19 @@ void doit(int clientfd)
         printf("Not support HTTP type, support only GET!");
         return;
     } else {
-        sprintf(send_msg, method, " ", uri);
+        send_pos += sprintf(send_pos + send_msg, method);
+        send_pos += sprintf(send_pos + send_msg, " ");
     }
-    sprintf(send_msg, " HTTP/1.0 \r\n");   // finish first
+   
 
     // check port
-    parse_uri(uri, hostname, port);
+    parse_uri(uri, hostname, port, file);
+    send_pos += sprintf(send_msg + send_pos, file);
+    send_pos += sprintf(send_msg + send_pos, " HTTP/1.0 \r\n");   // finish first
     // 2.read request-header, check if host exist, fullfill request_header, also append what's needed(version, suffix)
-    read_request_header(&rio, request_header, hostname);
+    read_request_header(&rio, request_header, hostname, port);
     // 3.combine the send_msg, 
-    sprintf(send_msg, request_header);
+    send_pos += sprintf(send_msg + send_pos, request_header);
     // 4.open connect to the server 
     /*
         Open connection to server at <hostname, port>
