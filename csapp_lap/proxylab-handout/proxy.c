@@ -34,7 +34,7 @@ from the client and parse the request
 typedef struct sockaddr_storage sockaddr_storage;
 
 
-void doit(int fd);
+void *doit(void *fd);
 int debug = 1;
 
 void yiyu_debug(char *s)
@@ -48,6 +48,7 @@ int main(int argc, char **argv)
 {
     int listenfd, connectfd;
     sockaddr_storage clientaddr; socklen_t clientlen;
+    pthread_t tid;
     // variable declare
     if (argc != 2) {
         unix_error("usage: just specify a port\n");
@@ -57,8 +58,9 @@ int main(int argc, char **argv)
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         connectfd = Accept(listenfd, &clientaddr, &clientlen);
-        doit(connectfd);
-        Close(connectfd);
+        Pthread_create(&tid, NULL, doit, (void*)connectfd);
+        // doit(connectfd);
+        Pthread_detach(tid);
     }
 
     printf("%s", user_agent_hdr);
@@ -183,8 +185,9 @@ void forward_msg(char *hostname, char *port, char *send_msg, int clientfd)
     Close(proxyfd);
 }
 
-void doit(int clientfd) 
+void *doit(void *clientfd_t) 
 {
+    int clientfd = (int) clientfd_t;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], hostname[MAXLINE],//if not specified in header, parse from uri 
     port[MAXLINE], request_header[MAXLINE];//if not specified in header, 80 
     char send_msg[MAXLINE]; int send_pos = 0;
@@ -196,14 +199,14 @@ void doit(int clientfd)
     Rio_readinitb(&rio, clientfd);
     // 1.read request line, check method, uri, version, check if valid
     if (!Rio_readlineb(&rio, buf, MAXLINE)) {
-        return;
+        return NULL;
     }
     yiyu_debug(buf);
     sscanf(buf, "%s %s %s", method, uri, version);
 
     if (strcasecmp(method, "GET")) {
         printf("Not support HTTP type, support only GET!");
-        return;
+        return NULL;
     } else {
         send_pos += sprintf(send_pos + send_msg, method);
         send_pos += sprintf(send_pos + send_msg, " ");
@@ -227,5 +230,6 @@ void doit(int clientfd)
         // 8.close proxyfd
     */
     forward_msg(hostname, port, send_msg, clientfd);
+    Close(clientfd);
 }
 
