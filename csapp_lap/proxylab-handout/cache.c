@@ -8,8 +8,10 @@
 
 /*
     implement a thread-safe circular queue
+    Not a LRU
     and its method.
     其实可能用hash+linked-list方式会更好，锁更小 Or ?? 再想想 这种链表的锁好像不是那么简单啊！！
+    读写锁在缓存里面好像至关重要啊~~~~ 如何处理饿死？
 */
 
 typedef struct cache_block {  
@@ -27,7 +29,7 @@ typedef struct cache {
 } cache;
 
 cache* init() {
-    cache *ptr = (cache*)malloc(sizeof(cache));
+    cache *ptr = (cache*)malloc(sizeof(cache));   // put cache in the heap so that all threads can access it easily
     if (ptr == NULL) {
         exit(1);
     }
@@ -42,21 +44,37 @@ cache* init() {
 }
 
 void reader_lock(cache *ptr) {
-
+    P(&(*ptr).mutex);
+    (*ptr).read_cnt += 1;
+    if((*ptr).read_cnt == 1) {
+        P(&(*ptr).w);
+    }
+    V(&(*ptr).mutex);
+    return;
 }
 
 void reader_unlock(cache *ptr) {
-
+    P(&(*ptr).mutex);
+    (*ptr).read_cnt -= 1;
+    if((*ptr).read_cnt == 0) {
+        V(&(*ptr).w);
+    }
+    V(&(*ptr).mutex);
+    return;
 }
 
 void writer_lock(cache *ptr) {
-
+    P(&(*ptr).w);
 }
 
 void writer_unlock(cache *ptr) {
-
+    V(&(*ptr).w);
 }
 
+/*
+    return NULL if missed
+    else return target cache 
+*/
 char* check_cache(char *target, cache *ptr) {
     char *ret = NULL;
     reader_lock(ptr);
@@ -71,6 +89,29 @@ char* check_cache(char *target, cache *ptr) {
     return ret;
 }
 
-void push_cache();
+/*
+    put a cache_block in the cache
+*/
+void push_cache(char *key, char *val, cache *ptr) {
+    writer_lock(ptr);
+    if ((*ptr).size == cache_size) {
+        pop_cache(ptr);
+    }
+    // notice here (*ptr).size < cache_size
+    (*ptr).tail = ((*ptr).tail + 1) % cache_size;
+    strcpy((*ptr).buff[(*ptr).tail].key, key);
+    strcpy((*ptr).buff[(*ptr).tail].val, val);
+    (*ptr).size += 1;
+    writer_unlock(ptr);
+}
 
-void pop_cache();
+/*
+    drop a cache
+    important: this function must called when holding a writer_lock!!!!
+
+*/
+void pop_cache(cache *ptr) {
+    int idx = ((*ptr).head + 1) % cache_size;
+    (*ptr).head = idx;
+    (*ptr).size -= 1;
+}

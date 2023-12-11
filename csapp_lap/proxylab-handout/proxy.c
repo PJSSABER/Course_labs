@@ -1,6 +1,8 @@
+#pragma once
 #include <stdio.h>
 #include "csapp.h"
 #include <stdbool.h>
+#include "cache.c"
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -32,7 +34,6 @@ from the client and parse the request
 
 #define clr(x) memset(x, 0, sizeof x)
 typedef struct sockaddr_storage sockaddr_storage;
-
 
 void *doit(void *fd);
 int debug = 1;
