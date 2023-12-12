@@ -11,18 +11,18 @@
     Not a LRU
     and its method.
     其实可能用hash+linked-list方式会更好，锁更小 Or ?? 再想想 这种链表的锁好像不是那么简单啊！！
-    读写锁在缓存里面好像至关重要啊~~~~ 如何处理饿死？
+    读写锁在缓存里面好像至关重要啊~~~~ 如何处理饿死？ 放一个semaphore reader P writer V 或者 reader内部一个生产者消费者
 */
 
 typedef struct cache_block {  
     char key[MAXLINE]; 
-    char val[MAX_OBJECT_SIZE];
+    char val[MAX_OBJECT_SIZE + 20];
 } cache_block;
 
-const int cache_size = 10;
+const static int cache_size = 10;
 
 typedef struct cache {  
-    cache_block buff[cache_size];
+    cache_block buff[10];
     int head, tail, size; // [head, tail]; when size == 0 (tail < head), it's empty
     int read_cnt;
     sem_t mutex, w;
@@ -90,6 +90,17 @@ char* check_cache(char *target, cache *ptr) {
 }
 
 /*
+    drop a cache
+    important: this function must called when holding a writer_lock!!!!
+
+*/
+void pop_cache(cache *ptr) {
+    int idx = ((*ptr).head + 1) % cache_size;
+    (*ptr).head = idx;
+    (*ptr).size -= 1;
+}
+
+/*
     put a cache_block in the cache
 */
 void push_cache(char *key, char *val, cache *ptr) {
@@ -103,15 +114,6 @@ void push_cache(char *key, char *val, cache *ptr) {
     strcpy((*ptr).buff[(*ptr).tail].val, val);
     (*ptr).size += 1;
     writer_unlock(ptr);
-}
-
-/*
-    drop a cache
-    important: this function must called when holding a writer_lock!!!!
-
-*/
-void pop_cache(cache *ptr) {
-    int idx = ((*ptr).head + 1) % cache_size;
-    (*ptr).head = idx;
-    (*ptr).size -= 1;
+    printf("############################## put in cache ####################");
+    printf("%s", (*ptr).buff[(*ptr).tail].val);
 }

@@ -37,6 +37,7 @@ typedef struct sockaddr_storage sockaddr_storage;
 
 void *doit(void *fd);
 int debug = 1;
+cache *ptr;
 
 void yiyu_debug(char *s)
 {
@@ -57,6 +58,7 @@ int main(int argc, char **argv)
     }
 
     listenfd = Open_listenfd(argv[1]);
+    ptr = init();
     while (1) {
         connectfd = Accept(listenfd, &clientaddr, &clientlen);
         Pthread_create(&tid, NULL, doit, (void*)connectfd);
@@ -167,23 +169,45 @@ void read_request_header(rio_t *rp, char *request_header, char* hostname, char *
     return;
 }
 
-void forward_msg(char *hostname, char *port, char *send_msg, int clientfd)
+void forward_msg(char *hostname, char *port, char *send_msg, int clientfd, char *cache_key)
 {
     int proxyfd, n;
     rio_t rio;
     char buf[MAXLINE]; clr(buf);
+    
+    char *cache_line = check_cache(cache_key, ptr);
+    if (cache_line != NULL) {
+        Rio_writen(clientfd, cache_line, strlen(cache_line));
+        return;
+    }
 
     yiyu_debug(send_msg);
     proxyfd = Open_clientfd(hostname, port);
     Rio_readinitb(&rio, proxyfd);
     Rio_writen(proxyfd, send_msg, strlen(send_msg));
-    
+
+    bool to_cache = true;
+    char *cache_val = (char*)calloc(MAX_OBJECT_SIZE, 8);  // to store cache val
+    int cur_size = 0;
+
     while ( (n = Rio_readlineb(&rio, buf, MAXLINE)) != 0 ) {          //line:netp:readhdrs:checkterm
-        Rio_writen(clientfd, buf, n);
         printf("%s", buf);
+        if (to_cache) {
+            if (n + cur_size >= MAX_OBJECT_SIZE) {
+                to_cache = false;
+            } else {
+                cur_size += n;
+                strcat(cache_val, buf);
+            }
+        }
+        Rio_writen(clientfd, buf, n);
     }
     //write to clientfd
     Close(proxyfd);
+    if (to_cache) {
+        push_cache(cache_key, cache_val, ptr);
+    }
+    free(cache_val);
 }
 
 void *doit(void *clientfd_t) 
@@ -195,6 +219,12 @@ void *doit(void *clientfd_t)
     char file[MAXLINE];
     clr(buf); clr(method); clr(uri); clr(version); clr(hostname); clr(port); clr(request_header); clr(send_msg); clr(file);
     // important！！！为什么要清除？ bug; 先跑 csapp.c 后跑 tiny的时候， stack复用后， file会是 tinyp.c
+
+    // for cache
+    char cache_key[MAXLINE]; 
+    clr(cache_key); 
+    int cache_pos = 0;
+
     rio_t rio;
 
     Rio_readinitb(&rio, clientfd);
@@ -218,10 +248,17 @@ void *doit(void *clientfd_t)
     parse_uri(uri, hostname, port, file);
     send_pos += sprintf(send_msg + send_pos, file);
     send_pos += sprintf(send_msg + send_pos, " HTTP/1.0 \r\n");   // finish first
+
     // 2.read request-header, check if host exist, fullfill request_header, also append what's needed(version, suffix)
     read_request_header(&rio, request_header, hostname, port);
     // 3.combine the send_msg, 
     send_pos += sprintf(send_msg + send_pos, request_header);
+    
+    // update cache_key
+    cache_pos += sprintf(cache_key + cache_pos, hostname);
+    cache_pos += sprintf(cache_key + cache_pos, port);
+    cache_pos += sprintf(cache_key + cache_pos, file);
+
     // 4.open connect to the server 
     /*
         Open connection to server at <hostname, port>
@@ -230,7 +267,8 @@ void *doit(void *clientfd_t)
         // 7.write to clientfd
         // 8.close proxyfd
     */
-    forward_msg(hostname, port, send_msg, clientfd);
+
+    forward_msg(hostname, port, send_msg, clientfd, cache_key);
     Close(clientfd);
 }
 
