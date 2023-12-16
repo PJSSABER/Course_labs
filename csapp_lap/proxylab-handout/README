@@ -47,3 +47,6 @@ nop-server.py
 tiny
     Tiny Web server from the CS:APP text
 
+hand-check:
+./tiny 5159 &
+curl --proxy http://localhost:3894 --output home.html http://localhost:5159/home.html
